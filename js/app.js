@@ -2,417 +2,335 @@
   "use strict";
 
   var els = {
-    tabBtns: document.querySelectorAll(".tab-btn"),
-    panelPhoto: document.getElementById("panel-photo"),
-    panelSearch: document.getElementById("panel-search"),
-    dropzone: document.getElementById("dropzone"),
-    fileInput: document.getElementById("file-input"),
-    previewArea: document.getElementById("preview-area"),
-    previewImg: document.getElementById("preview-img"),
-    analyzeBtn: document.getElementById("analyze-btn"),
-    resetBtn: document.getElementById("reset-btn"),
-    analyzeStatus: document.getElementById("analyze-status"),
-    photoResult: document.getElementById("photo-result"),
-    searchInput: document.getElementById("search-input"),
-    searchClear: document.getElementById("search-clear"),
-    filterChips: document.getElementById("filter-chips"),
-    resultTitle: document.getElementById("result-title"),
-    resultCount: document.getElementById("result-count"),
-    searchResults: document.getElementById("search-results"),
-    cardTemplate: document.getElementById("breed-card-template")
+    form: document.getElementById("search-form"),
+    search: document.getElementById("region-search"),
+    grid: document.getElementById("region-grid"),
+    detail: document.getElementById("detail-panel"),
+    filters: document.getElementById("filter-chips"),
+    sort: document.getElementById("sort-select"),
+    count: document.getElementById("result-count"),
+    title: document.getElementById("list-title"),
+    empty: document.getElementById("empty-state"),
+    total: document.getElementById("region-total"),
+    reset: document.getElementById("reset-filters"),
+    favoritesNav: document.getElementById("favorites-nav"),
+    favoriteCount: document.getElementById("favorite-count"),
+    themeToggle: document.getElementById("theme-toggle")
   };
 
   var state = {
-    model: null,
-    modelPromise: null,
-    imageDataUrl: null,
-    activeChips: {},
-    lastDogMatches: []
+    query: "",
+    filter: "all",
+    sort: "recommended",
+    selected: "seoul",
+    favoritesOnly: false,
+    favorites: readFavorites()
   };
 
-  var PARTICLE_RE = /(합니다|습니다|입니다|어요|에요|해요|이며|라는|다는|하고|부터|까지|으로|에서|적인|같은|은|는|이|가|을|를|의|와|과|도|만|에|로|고|다|요|랑|한)/;
-  var STOPWORDS = { "개": 1, "견": 1, "아": 1, "의": 1, "를": 1, "을": 1, "은": 1, "는": 1, "이": 1, "가": 1, "도": 1, "만": 1, "와": 1, "과": 1, "에": 1, "로": 1, "고": 1, "다": 1, "요": 1, "랑": 1, "한": 1, "그": 1, "저": 1, "것": 1, "수": 1, "적": 1 };
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
-
-  function stripParticles(token) {
-    var t = token;
-    var prev = null;
-    while (t !== prev && t.length >= 2) {
-      prev = t;
-      t = t.replace(PARTICLE_RE, "");
-      if (t.length < 2) break;
+  function readFavorites() {
+    try {
+      var stored = JSON.parse(localStorage.getItem("eodisal-favorites") || "[]");
+      return Array.isArray(stored) ? stored.filter(function (id) {
+        return window.REGIONS.some(function (region) { return region.id === id; });
+      }) : [];
     }
-    return t.length >= 2 ? t : null;
+    catch (error) { return []; }
   }
 
-  function tokenize(query) {
-    var raw = query.toLowerCase().replace(/[.,!?;:()[\]{}"'~^]/g, " ").split(/\s+/);
-    var tokens = [];
-    raw.forEach(function (w) {
-      if (!w) return;
-      if (w.length >= 2) tokens.push(w);
-      var stripped = stripParticles(w);
-      if (stripped && stripped !== w) tokens.push(stripped);
-      var one = w.replace(PARTICLE_RE, "");
-      if (one.length === 1 && !STOPWORDS[one]) tokens.push(one);
+  function saveFavorites() {
+    try { localStorage.setItem("eodisal-favorites", JSON.stringify(state.favorites)); }
+    catch (error) { /* 저장소를 사용할 수 없는 환경에서는 현재 화면에서만 유지합니다. */ }
+    els.favoriteCount.textContent = state.favorites.length;
+  }
+
+  function setTheme(theme) {
+    var isDark = theme === "dark";
+    document.documentElement.dataset.theme = isDark ? "dark" : "light";
+    els.themeToggle.setAttribute("aria-pressed", isDark ? "true" : "false");
+    els.themeToggle.setAttribute("aria-label", isDark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    els.themeToggle.title = isDark ? "라이트 모드로 전환" : "다크 모드로 전환";
+    var themeColor = document.querySelector('meta[name="theme-color"]');
+    if (themeColor) themeColor.setAttribute("content", isDark ? "#111713" : "#f7f7f2");
+    try { localStorage.setItem("eodisal-theme", theme); }
+    catch (error) { /* 저장소를 쓸 수 없어도 현재 화면에서는 테마를 바꿉니다. */ }
+  }
+
+  function initTheme() {
+    var theme = "light";
+    try { theme = localStorage.getItem("eodisal-theme") === "dark" ? "dark" : "light"; }
+    catch (error) { /* 기본값은 라이트 모드입니다. */ }
+    setTheme(theme);
+    els.themeToggle.addEventListener("click", function () {
+      setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
     });
-    var expanded = [];
-    tokens.forEach(function (t) {
-      expanded.push(t);
-      var syn = SYNONYMS[t];
-      if (syn) syn.forEach(function (s) { expanded.push(s); });
-    });
-    return expanded.filter(function (v, i, a) { return a.indexOf(v) === i; });
   }
 
-  function searchBreeds(query) {
-    var tokens = tokenize(query);
-    var chips = Object.keys(state.activeChips);
-    if (!tokens.length && !chips.length) return BREEDS.slice();
-    var hasTokens = tokens.length > 0;
-
-    return BREEDS.map(function (b) {
-      var score = hasTokens ? 0 : 1;
-      var tagHay = b.tags.join("|");
-      var allHay = (b.name + " " + b.en + " " + b.size + " " + b.personality + " " + b.desc + " " + tagHay).toLowerCase();
-      tokens.forEach(function (t) {
-        if (tagHay.indexOf(t) !== -1) score += 3;
-        else if (allHay.indexOf(t) !== -1) score += 1;
-      });
-      return { breed: b, score: score };
-    }).filter(function (x) {
-      if (x.score <= 0) return false;
-      for (var i = 0; i < chips.length; i++) {
-        if (x.breed.tags.indexOf(chips[i]) === -1) return false;
-      }
-      return true;
-    }).sort(function (a, b) { return b.score - a.score; })
-      .map(function (x) { return x.breed; });
+  function imageUrl(id, width) {
+    return "https://images.unsplash.com/" + id + "?auto=format&fit=crop&w=" + (width || 720) + "&q=78";
   }
 
-  function loadBreedImage(cardEl, breed) {
-    var img = cardEl.querySelector("img");
-    var fallback = cardEl.querySelector(".card-img-fallback");
-    if (!breed.imgPath) return;
-    var cache = loadBreedImage._cache || (loadBreedImage._cache = {});
-    var cached = cache[breed.id];
-    var src = cached || null;
-    var apply = function (url) {
-      cache[breed.id] = url;
-      img.onload = function () {
-        img.classList.add("loaded");
-        fallback.style.display = "none";
-      };
-      img.src = url;
+  function formatWon(value) {
+    return value.toLocaleString("ko-KR");
+  }
+
+  function includesQuery(region, query) {
+    if (!query) return true;
+    var priceWords = "아파트 " + region.apartment + " 주택 " + region.house + " 빌라 " + region.villa + " 집값 주거비";
+    var categoryWords = region.tags.join(" ").replace("coast", "바다 해안").replace("nature", "자연 산").replace("affordable", "저렴 부담 적은").replace("warm", "따뜻 온화");
+    var localAreas = (window.LOCAL_AREAS[region.id] || []).join(" ");
+    var haystack = [region.name, region.area, region.neighborhood, region.tagline, region.keywords,
+      region.economy, region.specialty, region.disasters, region.location, region.description, priceWords, categoryWords, localAreas, "범죄 범죄율 치안 안전"].join(" ").toLowerCase();
+    var related = {
+      "싼": ["저렴", "부담", "낮은"], "저렴": ["저렴", "부담", "낮은"], "부담": ["저렴", "부담"], "낮은": ["저렴", "부담", "낮은"], "낮": ["저렴", "부담", "낮은"],
+      "집값": ["집값", "아파트", "주거비"], "해변": ["바다", "해안"], "시원": ["연평균", "산"],
+      "따뜻": ["따뜻", "온화"], "산": ["산", "자연"], "바다": ["바다", "해안"],
+      "조용": ["차분", "여유", "한적"], "제주도": ["제주"], "강원도": ["강원"], "전라도": ["전북", "전주"]
     };
-    if (src) { apply(src); return; }
-    fetch("https://dog.ceo/api/breed/" + breed.imgPath + "/images/random")
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (data && data.status === "success" && data.message) apply(data.message);
-      })
-      .catch(function () { });
-  }
-
-  function createCard(breed, confidence) {
-    var node = els.cardTemplate.content.cloneNode(true);
-    var card = node.querySelector(".card");
-    node.querySelector(".card-name").textContent = breed.name;
-    node.querySelector(".card-en").textContent = breed.en;
-    var badge = node.querySelector(".size-badge");
-    badge.textContent = breed.size + "견";
-    node.querySelector(".stat-height").textContent = breed.height;
-    node.querySelector(".stat-weight").textContent = breed.weight;
-    node.querySelector(".stat-life").textContent = breed.life;
-    node.querySelector(".card-desc").textContent = breed.desc;
-    var tagsEl = node.querySelector(".card-tags");
-    breed.tags.slice(0, 7).forEach(function (t) {
-      var span = document.createElement("span");
-      span.className = "tag";
-      span.textContent = t;
-      tagsEl.appendChild(span);
+    var ignoredWords = { "가까이": true, "싶은": true, "싶어요": true, "싶어": true, "찾아줘": true, "찾고": true, "동네": true, "지역": true, "날씨": true, "생활": true, "살기": true, "좋은": true, "곳": true };
+    var words = query.toLowerCase().replace(/[.,!?;:()[\]{}"'~^]/g, " ").split(/\s+/).filter(Boolean).map(function (word) {
+      if (ignoredWords[word]) return "";
+      return word.replace(/(가까이|에서|으로|에게|한|은|는|이|가|을|를|에|로)$/g, "") || word;
+    }).filter(Boolean);
+    return words.every(function (word) {
+      if (haystack.indexOf(word) !== -1) return true;
+      return (related[word] || []).some(function (synonym) { return haystack.indexOf(synonym) !== -1; });
     });
-    loadBreedImage(card, breed);
-    if (typeof confidence === "number") {
-      var bar = document.createElement("div");
-      bar.className = "confidence";
-      bar.innerHTML =
-        '<div class="confidence-label"><span>AI 판정 신뢰도</span><em>' +
-        Math.round(confidence * 100) + "%</em></div>" +
-        '<div class="confidence-track"><div class="confidence-fill" style="width:' +
-        Math.round(confidence * 100) + '%"></div></div>';
-      card.querySelector(".card-body").prepend(bar);
-    }
-    return node;
   }
 
-  function setTab(tab) {
-    els.tabBtns.forEach(function (btn) {
-      var active = btn.dataset.tab === tab;
-      btn.classList.toggle("active", active);
-      btn.setAttribute("aria-selected", active ? "true" : "false");
+  function getVisibleRegions() {
+    var results = window.REGIONS.filter(function (region) {
+      if (state.favoritesOnly && state.favorites.indexOf(region.id) === -1) return false;
+      if (!includesQuery(region, state.query)) return false;
+      if (state.filter === "coast" && region.tags.indexOf("coast") === -1) return false;
+      if (state.filter === "nature" && region.tags.indexOf("nature") === -1) return false;
+      if (state.filter === "warm" && region.tags.indexOf("warm") === -1) return false;
+      if (state.filter === "affordable" && (parseFloat(region.apartment) > 4 || region.costIndex > 96)) return false;
+      return true;
     });
-    var photoActive = tab === "photo";
-    els.panelPhoto.classList.toggle("active", photoActive);
-    els.panelPhoto.hidden = !photoActive;
-    els.panelSearch.classList.toggle("active", !photoActive);
-    els.panelSearch.hidden = photoActive;
+
+    if (state.sort === "price") results.sort(function (a, b) { return parseFloat(a.apartment) - parseFloat(b.apartment); });
+    if (state.sort === "cost") results.sort(function (a, b) { return a.costIndex - b.costIndex; });
+    if (state.sort === "crime") results.sort(function (a, b) { return a.crimeRate - b.crimeRate; });
+    if (state.sort === "name") results.sort(function (a, b) { return a.name.localeCompare(b.name, "ko"); });
+    return results;
   }
 
-  function showStatus(msg) {
-    els.analyzeStatus.textContent = msg;
-    els.analyzeStatus.classList.remove("hidden");
-  }
+  function makeCard(region) {
+    var article = document.createElement("article");
+    article.className = "region-card" + (state.selected === region.id ? " selected" : "");
+    article.tabIndex = 0;
+    article.setAttribute("aria-label", region.name + " 지역 정보 보기");
+    article.setAttribute("aria-current", state.selected === region.id ? "true" : "false");
 
-  function hideStatus() {
-    els.analyzeStatus.classList.add("hidden");
-  }
+    var cover = document.createElement("div");
+    cover.className = "region-image";
+    var img = document.createElement("img");
+    img.src = imageUrl(region.image, 650);
+    img.alt = region.alt;
+    img.loading = "lazy";
+    cover.appendChild(img);
+    var place = document.createElement("div");
+    place.className = "region-place";
+    place.innerHTML = "<strong></strong>";
+    place.querySelector("strong").textContent = region.name;
+    place.appendChild(document.createTextNode(region.area));
+    cover.appendChild(place);
 
-  function ensureModel() {
-    if (state.model) return Promise.resolve(state.model);
-    if (state.modelPromise) return state.modelPromise;
-    showStatus("AI 모델을 불러오는 중... (처음 한 번만 다운로드되며 몇 초 걸릴 수 있어요)");
-    state.modelPromise = mobilenet.load().then(function (model) {
-      state.model = model;
-      return model;
+    var save = document.createElement("button");
+    save.type = "button";
+    save.className = "save-button" + (state.favorites.indexOf(region.id) !== -1 ? " saved" : "");
+    save.setAttribute("aria-label", state.favorites.indexOf(region.id) !== -1 ? region.name + " 저장 취소" : region.name + " 저장");
+    save.setAttribute("aria-pressed", state.favorites.indexOf(region.id) !== -1 ? "true" : "false");
+    save.textContent = state.favorites.indexOf(region.id) !== -1 ? "♥" : "♡";
+    save.addEventListener("click", function (event) {
+      event.stopPropagation();
+      toggleFavorite(region.id);
     });
-    return state.modelPromise;
+    cover.appendChild(save);
+
+    var info = document.createElement("div");
+    info.className = "region-info";
+    var tagline = document.createElement("p");
+    tagline.className = "region-tagline";
+    tagline.textContent = region.tagline;
+    info.appendChild(tagline);
+
+    var meta = document.createElement("div");
+    meta.className = "region-meta";
+    meta.innerHTML = '<div class="meta-item"><span>아파트 참고가</span><strong></strong></div><i class="meta-divider"></i><div class="meta-item"><span>생활물가</span><strong></strong></div><i class="meta-divider"></i><div class="meta-item"><span>범죄율 · 10만 명당</span><strong></strong></div>';
+    meta.querySelectorAll(".meta-item strong")[0].textContent = region.apartment;
+    meta.querySelectorAll(".meta-item strong")[1].textContent = "전국 평균 " + region.costIndex;
+    meta.querySelectorAll(".meta-item strong")[2].textContent = formatWon(Math.round(region.crimeRate)) + "건";
+    info.appendChild(meta);
+    article.appendChild(cover);
+    article.appendChild(info);
+
+    article.addEventListener("click", function () { selectRegion(region.id); });
+    article.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        if (event.target === article) { event.preventDefault(); selectRegion(region.id); }
+      }
+    });
+    return article;
   }
 
-  function resetPhoto() {
-    state.imageDataUrl = null;
-    state.lastDogMatches = [];
-    els.fileInput.value = "";
-    els.previewArea.classList.add("hidden");
-    els.photoResult.innerHTML = "";
-    els.dropzone.classList.remove("hidden");
-    hideStatus();
+  function renderMap(region) {
+    var x = Math.max(20, Math.min(80, (region.lng - 124) * 13));
+    var y = Math.max(17, Math.min(82, (39 - region.lat) * 13));
+    return '<div class="location-map" aria-hidden="true"><svg viewBox="0 0 150 100"><path class="map-land" d="M66 5 78 9 83 18 94 22 91 31 99 39 92 47 96 55 88 62 91 72 82 80 76 93 65 89 58 80 60 70 51 62 55 52 48 44 56 34 53 25 60 17z"/><path class="map-island" d="m52 82 5 2-1 4-6-1z"/><circle class="map-pulse" cx="' + x + '" cy="' + y + '" r="7"/><circle class="map-pin" cx="' + x + '" cy="' + y + '" r="3"/></svg><span>대한민국 <b>' + region.name + '</b></span></div>';
   }
 
-  function handleFile(file) {
-    if (!file || file.type.indexOf("image") !== 0) {
-      showStatus("이미지 파일(JPG, PNG 등)만 업로드할 수 있어요.");
+  function renderLocalAreas(region) {
+    var areas = window.LOCAL_AREAS[region.id] || [];
+    return '<div class="detail-section-title">잘 알려진 동네 <span>' + areas.length + '곳 · 지도에서 보기</span></div><div class="local-area-list">' +
+      areas.map(function (area) {
+        var query = region.name + " " + area;
+        return '<a class="local-area-chip" href="https://map.naver.com/p/search/' + encodeURIComponent(query) + '" target="_blank" rel="noreferrer"><span class="area-pin" aria-hidden="true">⌖</span>' + area + '<span class="area-arrow" aria-hidden="true">↗</span></a>';
+      }).join("") +
+      '</div><p class="local-area-note">동네 예시는 각 시·도 안의 대표적인 생활·관광권을 소개합니다.</p>';
+  }
+
+  function renderDetail(region) {
+    if (!region) {
+      els.detail.innerHTML = '<div class="detail-empty"><span>♡</span><strong>저장한 지역이 아직 없어요.</strong><p>마음에 드는 동네의 하트를 눌러 모아보세요.</p></div>';
       return;
     }
-    var reader = new FileReader();
-    reader.onload = function (e) {
-      state.imageDataUrl = e.target.result;
-      els.previewImg.src = state.imageDataUrl;
-      els.dropzone.classList.add("hidden");
-      els.previewArea.classList.remove("hidden");
-      els.photoResult.innerHTML = "";
-      hideStatus();
-    };
-    reader.readAsDataURL(file);
+    var saved = state.favorites.indexOf(region.id) !== -1;
+    var crimeDelta = ((region.crimeRate - window.NATIONAL_CRIME_RATE) / window.NATIONAL_CRIME_RATE) * 100;
+    var crimeDifference = Math.abs(crimeDelta).toFixed(1) + "%";
+    var crimeDirection = crimeDelta > 0 ? "전국 평균보다" : crimeDelta < 0 ? "전국 평균보다" : "전국 평균과";
+    var crimeComparison = crimeDelta > 0 ? "높음" : crimeDelta < 0 ? "낮음" : "같음";
+    els.detail.innerHTML =
+      '<div class="detail-cover"><img src="' + imageUrl(region.photo, 850) + '" alt="' + region.alt + '" loading="lazy" />' +
+        '<div class="detail-heading"><div><span class="detail-kicker">A CLOSER LOOK AT</span><h3>' + region.name + '</h3><p>' + region.neighborhood + '</p></div>' +
+        '<button class="detail-save' + (saved ? ' saved' : '') + '" type="button" aria-pressed="' + saved + '">' + (saved ? '♥ 저장됨' : '♡ 저장하기') + '</button></div></div>' +
+      '<div class="detail-body"><div class="detail-intro"><p>' + region.description + '</p><span class="detail-badge">' + region.area + '</span></div>' +
+        renderLocalAreas(region) +
+        '<div class="detail-section-title">이 지역의 날씨 <span>기후 평년 특성</span></div>' +
+        '<div class="weather-strip"><div class="weather-symbol" aria-hidden="true">' + region.icon + '</div><div class="weather-main"><strong>' + region.temperature + '</strong><span>사계절 기후 특성</span></div><div class="weather-stat"><strong>' + region.rainfall + '</strong><span>지역별 편차 있음</span></div></div>' +
+        '<div class="detail-section-title">주거 형태별 평균 집값 <span>참고용 추정치</span></div>' +
+        '<div class="price-grid"><div class="price-item"><span>아파트 · 84㎡</span><strong>' + region.apartment + '</strong><em>매매가 예시</em></div><div class="price-item"><span>단독주택 · 60㎡</span><strong>' + region.house + '</strong><em>매매가 예시</em></div><div class="price-item"><span>빌라 · 60㎡</span><strong>' + region.villa + '</strong><em>매매가 예시</em></div></div>' +
+        '<div class="detail-section-title">범죄 발생 통계 <span>2024년 · 건/인구 10만 명</span></div>' +
+        '<div class="crime-panel"><div class="crime-numbers"><div><strong>' + region.crimeRate.toLocaleString("ko-KR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '</strong><span>이 지역</span></div><div class="crime-average"><strong>' + window.NATIONAL_CRIME_RATE.toLocaleString("ko-KR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '</strong><span>전국 평균</span></div><div class="crime-delta ' + (crimeDelta > 0 ? "above" : crimeDelta < 0 ? "below" : "") + '"><strong>' + crimeDifference + '</strong><span>' + crimeDirection + ' ' + crimeComparison + '</span></div></div><div class="crime-track" aria-label="전국 평균 대비 범죄 발생 건수"><span style="width:' + Math.min(100, (region.crimeRate / 5000) * 100) + '%"></span><i style="left:' + Math.min(100, (window.NATIONAL_CRIME_RATE / 5000) * 100) + '%"></i></div><div class="crime-scale"><span>0건</span><span>전국 평균 표시</span><span>5,000건</span></div></div>' +
+        '<div class="detail-section-title">동네 생활 정보</div><div class="detail-facts">' +
+          '<div class="fact"><span>지역 경기</span><strong>' + region.economy + '</strong></div><div class="fact"><span>생활물가 지수</span><strong>전국 평균 100 대비 ' + region.costIndex + '</strong></div>' +
+          '<div class="fact"><span>지역 특산품</span><strong>' + region.specialty + '</strong></div><div class="fact"><span>1인 월 생활비</span><strong>' + region.monthlyCost + ' · 주거비 제외</strong></div>' +
+          '<div class="fact"><span>자주 살펴볼 자연재해</span><strong>' + region.disasters + '</strong></div><div class="fact"><span>위치</span><strong>' + region.location + '</strong></div>' +
+        '</div>' + renderMap(region) +
+        '<a class="map-link" href="https://map.naver.com/p/search/' + encodeURIComponent(region.mapQuery) + '" target="_blank" rel="noreferrer"><span>지도에서 ' + region.name + ' 위치 확인</span><b aria-hidden="true">↗</b></a>' +
+        '<p class="detail-source">범죄율 출처: 검찰청 「범죄분석통계」와 국가데이터처 「장래인구추계」(2022년 기준 인구, 2024년 범죄 발생). 인구 대비 발생 건수로, 관광객·유동인구와 개인의 피해 가능성을 반영한 안전도는 아닙니다. 집값·물가는 참고용 예시 추정치입니다. <a href="https://kosis.kr/search/search.do?query=%EC%8B%9C%EB%8F%84%EB%B3%84%20%EB%B2%94%EC%A3%84%EC%9C%A8" target="_blank" rel="noreferrer">공식 통계 보기 ↗</a></p></div>';
+    els.detail.querySelector(".detail-save").addEventListener("click", function () { toggleFavorite(region.id); });
   }
 
-  function renderPhotoMatch(match, candidates) {
-    els.photoResult.innerHTML = "";
-    var breed = match.breedId ? getBreedById(match.breedId) : null;
-    var wrap = document.createElement("div");
-    wrap.className = "photo-match";
+  function render() {
+    var results = getVisibleRegions();
+    els.grid.innerHTML = "";
+    results.forEach(function (region) { els.grid.appendChild(makeCard(region)); });
+    els.total.textContent = window.REGIONS.length;
+    els.count.textContent = results.length + "개 지역";
+    els.empty.hidden = results.length !== 0;
+    els.grid.hidden = results.length === 0;
+    els.title.textContent = state.favoritesOnly ? "저장한 동네" : state.query || state.filter !== "all" ? "찾아본 지역" : "지금 눈여겨볼 동네";
+    els.favoritesNav.classList.toggle("active", state.favoritesOnly);
+    els.favoritesNav.setAttribute("aria-pressed", state.favoritesOnly ? "true" : "false");
 
-    var head = document.createElement("div");
-    head.className = "match-head";
-    if (breed) {
-      head.innerHTML = '<p class="match-label">AI가 예측한 견종은 <strong>' +
-        escapeHtml(breed.name) + "</strong> 입니다</p>";
+    var selected = results.find(function (region) { return region.id === state.selected; }) || results[0];
+    if (selected) {
+      state.selected = selected.id;
+      renderDetail(selected);
+    } else if (state.favoritesOnly) {
+      renderDetail(null);
     } else {
-      head.innerHTML = '<p class="match-label">AI가 예측한 품종: <strong>' +
-        escapeHtml(match.label) + "</strong> (상세 정보 DB에 없음)</p>";
-    }
-    wrap.appendChild(head);
-
-    if (breed) {
-      wrap.appendChild(createCard(breed, match.prob));
-    }
-
-    if (candidates && candidates.length) {
-      var other = document.createElement("div");
-      other.className = "other-candidates";
-      var title = document.createElement("p");
-      title.className = "other-title";
-      title.textContent = "다른 가능성 높은 견종 후보";
-      other.appendChild(title);
-      var chipRow = document.createElement("div");
-      chipRow.className = "candidate-row";
-      candidates.forEach(function (c) {
-        var cb = c.breedId ? getBreedById(c.breedId) : null;
-        var chip = document.createElement("button");
-        chip.className = "candidate-chip" + (cb ? "" : " disabled");
-        chip.innerHTML = escapeHtml(cb ? cb.name : c.label) +
-          '<em>' + Math.round(c.prob * 100) + "%</em>";
-        if (cb) {
-          chip.addEventListener("click", function () {
-            renderPhotoMatch({ label: c.label, breedId: c.breedId, prob: c.prob },
-              state.lastDogMatches.filter(function (m) { return m !== c; }));
-          });
-        }
-        chipRow.appendChild(chip);
-      });
-      other.appendChild(chipRow);
-      wrap.appendChild(other);
-    }
-
-    els.photoResult.appendChild(wrap);
-    wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-
-  function analyze() {
-    if (!state.imageDataUrl) return;
-    els.analyzeBtn.disabled = true;
-    els.photoResult.innerHTML = "";
-    showStatus("사진을 분석하는 중...");
-    ensureModel()
-      .then(function (model) {
-        showStatus("사진을 분석하는 중...");
-        return model.classify(els.previewImg, 10);
-      })
-      .then(function (preds) {
-        hideStatus();
-        els.analyzeBtn.disabled = false;
-        var dogMatches = preds.filter(function (p) { return isDogLabel(p.className); })
-          .map(function (p) {
-            return { label: p.className, breedId: mapLabelToBreedId(p.className), prob: p.probability };
-          });
-        state.lastDogMatches = dogMatches;
-        if (!dogMatches.length) {
-          var top = preds[0] ? preds[0].className : "알 수 없음";
-          els.photoResult.innerHTML =
-            '<div class="no-dog"><strong>강아지로 보이는 사진이 아니에요.</strong>' +
-            "<p>AI는 이 사진을 다음과 같이 인식했습니다: " + escapeHtml(top) +
-            "</p><p>강아지가 정면으로 잘 나온 사진으로 다시 시도해 주세요.</p></div>";
-          return;
-        }
-        var primary = dogMatches[0];
-        var rest = dogMatches.slice(1, 5);
-        renderPhotoMatch(primary, rest);
-      })
-      .catch(function (err) {
-        hideStatus();
-        els.analyzeBtn.disabled = false;
-        showStatus("분석 중 오류가 발생했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.");
-        console.error(err);
-      });
-  }
-
-  function renderSearch() {
-    var q = els.searchInput.value.trim();
-    els.searchClear.classList.toggle("hidden", q.length === 0);
-    var results = searchBreeds(q);
-    var chips = Object.keys(state.activeChips);
-
-    els.searchResults.innerHTML = "";
-    if (results.length) {
-      els.resultTitle.textContent = q || chips.length ? "검색 결과" : "전체 견종";
-      els.resultCount.textContent = results.length + "종";
-      results.forEach(function (b) {
-        els.searchResults.appendChild(createCard(b));
-      });
-    } else {
-      els.resultTitle.textContent = "검색 결과";
-      els.resultCount.textContent = "0종";
-      var empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.innerHTML = "<strong>조건에 맞는 견종이 없어요.</strong>" +
-        "<p>키워드를 줄이거나 다른 표현으로 검색해 보세요. (예: 작은, 온순한, 활동적, 아파트, 초보)</p>";
-      els.searchResults.appendChild(empty);
+      els.detail.innerHTML = '<div class="detail-empty"><span>⌕</span><strong>검색 결과가 없어요.</strong><p>다른 지역이나 생활환경으로 검색해 보세요.</p></div>';
     }
   }
 
-  function bindEvents() {
-    els.tabBtns.forEach(function (btn) {
-      btn.addEventListener("click", function () { setTab(btn.dataset.tab); });
-    });
+  function selectRegion(id) {
+    state.selected = id;
+    render();
+    if (window.matchMedia("(max-width: 680px)").matches) {
+      els.detail.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
 
-    els.dropzone.addEventListener("click", function () { els.fileInput.click(); });
-    els.dropzone.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); els.fileInput.click(); }
-    });
-    els.fileInput.addEventListener("change", function () {
-      if (els.fileInput.files && els.fileInput.files[0]) handleFile(els.fileInput.files[0]);
-    });
+  function toggleFavorite(id) {
+    var index = state.favorites.indexOf(id);
+    if (index === -1) state.favorites.push(id);
+    else state.favorites.splice(index, 1);
+    saveFavorites();
+    render();
+  }
 
-    ["dragenter", "dragover"].forEach(function (ev) {
-      els.dropzone.addEventListener(ev, function (e) {
-        e.preventDefault();
-        els.dropzone.classList.add("dragging");
-      });
+  function setFilter(filter, button) {
+    state.filter = filter;
+    state.favoritesOnly = false;
+    els.filters.querySelectorAll(".filter-chip").forEach(function (chip) {
+      var active = chip === button;
+      chip.classList.toggle("active", active);
+      chip.setAttribute("aria-pressed", active ? "true" : "false");
     });
-    ["dragleave", "drop"].forEach(function (ev) {
-      els.dropzone.addEventListener(ev, function (e) {
-        e.preventDefault();
-        els.dropzone.classList.remove("dragging");
-      });
-    });
-    els.dropzone.addEventListener("drop", function (e) {
-      var dt = e.dataTransfer;
-      if (dt.files && dt.files[0]) handleFile(dt.files[0]);
-    });
-
-    document.addEventListener("paste", function (e) {
-      if (!els.panelPhoto.classList.contains("active")) return;
-      var items = e.clipboardData && e.clipboardData.items;
-      if (!items) return;
-      for (var i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") === 0) {
-          handleFile(items[i].getAsFile());
-          break;
-        }
-      }
-    });
-
-    els.analyzeBtn.addEventListener("click", analyze);
-    els.resetBtn.addEventListener("click", resetPhoto);
-
-    var debounceTimer = null;
-    els.searchInput.addEventListener("input", function () {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(renderSearch, 120);
-    });
-    els.searchInput.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); renderSearch(); }
-    });
-    els.searchClear.addEventListener("click", function () {
-      els.searchInput.value = "";
-      renderSearch();
-      els.searchInput.focus();
-    });
-
-    els.filterChips.addEventListener("click", function (e) {
-      var chip = e.target.closest(".chip");
-      if (!chip) return;
-      var key = chip.dataset.chip;
-      if (state.activeChips[key]) {
-        delete state.activeChips[key];
-        chip.classList.remove("active");
-      } else {
-        state.activeChips[key] = true;
-        chip.classList.add("active");
-      }
-      renderSearch();
-    });
+    render();
   }
 
   function init() {
-    bindEvents();
-    setTab("photo");
-    renderSearch();
-    if (typeof tf === "undefined" || typeof mobilenet === "undefined") {
-      console.warn("TensorFlow.js 로드에 실패했습니다. 인터넷 연결을 확인하세요.");
-      els.analyzeBtn.disabled = true;
-      els.analyzeBtn.title = "AI 라이브러리를 불러올 수 없습니다. 인터넷 연결 후 새로고침 해주세요.";
-    }
+    initTheme();
+    saveFavorites();
+    els.filters.querySelectorAll(".filter-chip").forEach(function (chip) {
+      chip.setAttribute("aria-pressed", chip.classList.contains("active") ? "true" : "false");
+    });
+    els.form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      state.query = els.search.value.trim();
+      state.favoritesOnly = false;
+      render();
+      document.getElementById("regions").scrollIntoView({ behavior: "smooth" });
+    });
+    els.search.addEventListener("input", function () {
+      state.query = els.search.value.trim();
+      state.favoritesOnly = false;
+      render();
+    });
+    document.querySelectorAll(".popular-searches button").forEach(function (button) {
+      button.addEventListener("click", function () {
+        els.search.value = button.dataset.query;
+        state.query = els.search.value;
+        state.favoritesOnly = false;
+        render();
+        document.getElementById("regions").scrollIntoView({ behavior: "smooth" });
+      });
+    });
+    els.filters.addEventListener("click", function (event) {
+      var button = event.target.closest(".filter-chip");
+      if (button) setFilter(button.dataset.filter, button);
+    });
+    els.sort.addEventListener("change", function () {
+      state.sort = els.sort.value;
+      render();
+    });
+    els.favoritesNav.addEventListener("click", function () {
+      state.favoritesOnly = !state.favoritesOnly;
+      state.query = "";
+      els.search.value = "";
+      state.filter = "all";
+      els.filters.querySelectorAll(".filter-chip").forEach(function (chip) {
+        var active = chip.dataset.filter === "all";
+        chip.classList.toggle("active", active);
+        chip.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      render();
+      document.getElementById("regions").scrollIntoView({ behavior: "smooth" });
+    });
+    els.reset.addEventListener("click", function () {
+      state.query = "";
+      state.filter = "all";
+      state.favoritesOnly = false;
+      els.search.value = "";
+      var all = els.filters.querySelector('[data-filter="all"]');
+      setFilter("all", all);
+    });
+    render();
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
 })();

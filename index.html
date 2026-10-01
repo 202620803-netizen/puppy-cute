@@ -3,138 +3,95 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>멍멍검색 - 견종 찾기 &amp; 특징 검색</title>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <meta name="theme-color" content="#f7f7f2" />
+  <meta name="description" content="날씨부터 집값까지, 나에게 잘 맞는 대한민국의 동네를 찾아보세요." />
+  <title>어디살까 — 나에게 맞는 동네 찾기</title>
+  <script>try { if (localStorage.getItem("eodisal-theme") === "dark") document.documentElement.dataset.theme = "dark"; } catch (error) {}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
-  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js"></script>
   <script defer src="js/data.js"></script>
   <script defer src="js/app.js"></script>
 </head>
 <body>
-  <header class="header">
-    <div class="container header-inner">
-      <div class="logo">
-        <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true">
-          <ellipse cx="7" cy="7.5" rx="2.1" ry="3" />
-          <ellipse cx="17" cy="7.5" rx="2.1" ry="3" />
-          <ellipse cx="3.2" cy="12.5" rx="2" ry="2.7" transform="rotate(-25 3.2 12.5)" />
-          <ellipse cx="20.8" cy="12.5" rx="2" ry="2.7" transform="rotate(25 20.8 12.5)" />
-          <path d="M12 10.5c3.6 0 6.5 2.7 6.5 6 0 2.8-2.3 4.5-6.5 4.5S5.5 19.3 5.5 16.5c0-3.3 2.9-6 6.5-6z" />
-        </svg>
-        <span>멍멍검색</span>
-      </div>
-      <nav class="tabs" role="tablist">
-        <button id="tab-photo" class="tab-btn active" role="tab" aria-selected="true" data-tab="photo">사진으로 찾기</button>
-        <button id="tab-search" class="tab-btn" role="tab" aria-selected="false" data-tab="search">특징으로 찾기</button>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#top" aria-label="어디살까 홈">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M4 14.3 16 4l12 10.3v13a1.7 1.7 0 0 1-1.7 1.7h-7.1v-9h-6.4v9H5.7A1.7 1.7 0 0 1 4 27.3z"/><path class="brand-window" d="M9 15h4v4H9zm10 0h4v4h-4z"/></svg></span>
+        <span>어디살까<span class="brand-dot">.</span></span>
+      </a>
+      <nav class="header-nav" aria-label="주요 메뉴">
+        <a class="nav-link active" href="#regions">지역 둘러보기</a>
+        <button id="favorites-nav" class="nav-link favorites-nav" type="button"><span aria-hidden="true">♡</span> 저장한 지역 <span id="favorite-count" class="favorite-count">0</span></button>
       </nav>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="다크 모드로 전환" aria-pressed="false" title="다크 모드로 전환">
+        <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.6 8.6 0 1 0 20.2 15.1Z"/></svg>
+        <svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>
+      </button>
+      <a class="header-cta" href="#search">내 동네 찾기 <span aria-hidden="true">↗</span></a>
     </div>
   </header>
 
-  <main class="container">
-    <section id="panel-photo" class="panel active" role="tabpanel">
-      <div class="hero">
-        <h1>강아지 사진을 올리면 견종을 찾아드려요</h1>
-        <p>AI가 사진을 분석해 견종과 유사한 다른 견종 후보까지 함께 보여줍니다.</p>
-      </div>
-
-      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="사진 업로드">
-        <input type="file" id="file-input" accept="image/*" hidden />
-        <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 16V4m0 0l-4 4m4-4l4 4" />
-          <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-        </svg>
-        <strong>여기를 클릭하거나 사진을 끌어다 놓으세요</strong>
-        <span>JPG, PNG 등 이미지 파일 (Ctrl+V 로 붙여넣기도 가능)</span>
-      </div>
-
-      <div id="preview-area" class="preview-area hidden">
-        <div class="preview-img-wrap">
-          <img id="preview-img" alt="업로드한 강아지 사진" />
+  <main id="top">
+    <section class="hero-wrap">
+      <div class="hero container">
+        <div id="search" class="hero-copy">
+          <div class="eyebrow"><span class="eyebrow-line"></span> A PLACE THAT FEELS LIKE YOU</div>
+          <h1>사는 곳이 달라지면,<br /><span>일상도 달라지니까.</span></h1>
+          <p class="hero-subtitle">날씨부터 집값까지 한눈에 비교하고<br class="mobile-break" /> 나에게 잘 맞는 동네를 찾아보세요.</p>
+          <form id="search-form" class="search-box" role="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.2 4.2"/></svg>
+            <input id="region-search" type="search" placeholder="어떤 동네를 찾고 있나요? 예: 바다, 제주, 집값" autocomplete="off" aria-label="지역이나 원하는 생활환경 검색" />
+            <button type="submit">지역 찾기 <span aria-hidden="true">→</span></button>
+          </form>
+          <div class="popular-searches"><span>인기 검색</span><button data-query="바다"># 바다 가까이</button><button data-query="집값"># 부담 적은 집값</button><button data-query="따뜻"># 따뜻한 날씨</button></div>
         </div>
-        <div class="preview-actions">
-          <button id="analyze-btn" class="btn btn-primary">견종 분석하기</button>
-          <button id="reset-btn" class="btn btn-ghost">다른 사진 고르기</button>
+        <div class="hero-art" aria-label="초록 산과 바다가 어우러진 풍경">
+          <img src="https://images.unsplash.com/photo-1470770841072-f978cf4d019e?auto=format&fit=crop&w=1100&q=85" alt="산과 호수가 어우러진 평화로운 풍경" />
+          <div class="hero-photo-shade"></div>
+          <div class="hero-note"><span class="note-icon">✳</span><span><strong>좋은 동네의 기준은</strong><br />사람마다 다르니까</span></div>
+          <div class="photo-caption"><span class="caption-dot"></span> 오늘, 살고 싶은 곳을 발견해요</div>
         </div>
+        <div class="hero-stamp" aria-hidden="true"><span>LIVE<br />YOUR<br />OWN WAY</span><b>↘</b></div>
       </div>
-
-      <div id="analyze-status" class="status hidden"></div>
-      <div id="photo-result" class="photo-result"></div>
     </section>
 
-    <section id="panel-search" class="panel" role="tabpanel" hidden>
-      <div class="hero">
-        <h1>원하는 특징을 입력해 보세요</h1>
-        <p>예) 작고 활동적인, 온순하고 아파트에 사는, 털빠짐이 적은 초보자용</p>
+    <section id="regions" class="explore-section container">
+      <div class="section-heading">
+        <div><div class="section-kicker">FIND YOUR PLACE</div><h2>어디에서 살아볼까요<span>?</span></h2><p>서울부터 제주까지, 전국 17개 시·도의 생활 정보를 비교해 보세요.</p></div>
+        <div class="heading-side"><span class="live-dot"></span> 전국 <strong id="region-total">0</strong>개 지역 살펴보기</div>
       </div>
 
-      <div class="search-bar">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-          <circle cx="11" cy="11" r="7" />
-          <path d="M20 20l-3.5-3.5" />
-        </svg>
-        <input type="text" id="search-input" placeholder="특징을 입력하세요 (예: 작고 순한 소형견)" autocomplete="off" />
-        <button id="search-clear" class="search-clear hidden" aria-label="지우기">&times;</button>
+      <div class="filter-bar" aria-label="지역 필터">
+        <div id="filter-chips" class="filter-chips">
+          <button class="filter-chip active" data-filter="all">전체 지역</button>
+          <button class="filter-chip" data-filter="coast">바다 가까이</button>
+          <button class="filter-chip" data-filter="nature">자연 속에서</button>
+          <button class="filter-chip" data-filter="affordable">집값 부담 적은</button>
+          <button class="filter-chip" data-filter="warm">따뜻한 날씨</button>
+        </div>
+        <label class="sort-control"><span>정렬</span><select id="sort-select" aria-label="지역 정렬"><option value="recommended">추천순</option><option value="price">아파트 집값 낮은순</option><option value="cost">생활비 낮은순</option><option value="crime">범죄 발생률 낮은순</option><option value="name">이름순</option></select><span class="select-chevron">⌄</span></label>
       </div>
 
-      <div class="chips" id="filter-chips">
-        <button class="chip" data-chip="소형">소형</button>
-        <button class="chip" data-chip="중형">중형</button>
-        <button class="chip" data-chip="대형">대형</button>
-        <button class="chip" data-chip="아파트적합">아파트 적합</button>
-        <button class="chip" data-chip="초보자적합">초보자 추천</button>
-        <button class="chip" data-chip="아이와잘맞음">아이와 친함</button>
-        <button class="chip" data-chip="활동적">활동적</button>
-        <button class="chip" data-chip="조용한">조용함</button>
-        <button class="chip" data-chip="털잘안빠짐">털빠짐 적음</button>
-        <button class="chip" data-chip="똑똑한">똑똑함</button>
-      </div>
+      <div class="content-layout">
+        <section class="region-column" aria-label="지역 목록">
+          <div class="list-heading"><div><span class="list-kicker">CURATED FOR EVERYDAY</span><h3 id="list-title">지금 눈여겨볼 동네</h3></div><span id="result-count" class="result-count"></span></div>
+          <div id="region-grid" class="region-grid"></div>
+          <div id="empty-state" class="empty-state" hidden><span>⌕</span><strong>아직 찾는 동네가 없어요.</strong><p>검색어나 필터를 바꿔 다시 찾아보세요.</p><button id="reset-filters" type="button">전체 지역 보기</button></div>
+        </section>
 
-      <div class="result-head">
-        <h2 id="result-title">전체 견종</h2>
-        <span id="result-count" class="result-count"></span>
+        <aside id="detail-panel" class="detail-panel" aria-label="선택한 지역 상세 정보" aria-live="polite"></aside>
       </div>
-      <div id="search-results" class="grid"></div>
+    </section>
+
+    <section class="note-section container">
+      <div class="note-icon-large" aria-hidden="true">i</div>
+      <div><strong>숫자는 참고용, 결정은 직접 확인해 주세요.</strong><p>집값·생활비는 지역 비교를 위한 예시 추정치입니다. 범죄율은 2024년 전체 범죄 발생 건수를 2022년 기준 추계인구로 나눈 값이며, 관광·유동인구가 많은 지역의 실제 체감 안전도와 다를 수 있습니다.</p></div>
+      <div class="note-links"><a href="https://kosis.kr/search/search.do?query=%EC%8B%9C%EB%8F%84%EB%B3%84%20%EB%B2%94%EC%A3%84%EC%9C%A8" target="_blank" rel="noreferrer">KOSIS 지역별 범죄 통계 <span aria-hidden="true">↗</span></a><a href="https://rt.molit.go.kr/" target="_blank" rel="noreferrer">실거래가 확인 <span aria-hidden="true">↗</span></a></div>
     </section>
   </main>
 
-  <footer class="footer">
-    <div class="container">
-      <p>사진 분석: TensorFlow.js MobileNet (브라우저에서만 처리되며 사진은 전송·저장되지 않습니다)</p>
-      <p>이미지 출처: dog.ceo · 분석 결과는 참고용이며 100% 정확하지 않을 수 있습니다</p>
-    </div>
-  </footer>
-
-  <template id="breed-card-template">
-    <article class="card">
-      <div class="card-img">
-        <img loading="lazy" alt="" />
-        <div class="card-img-fallback" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="42" height="42" fill="currentColor">
-            <ellipse cx="7" cy="7.5" rx="2.1" ry="3" />
-            <ellipse cx="17" cy="7.5" rx="2.1" ry="3" />
-            <ellipse cx="3.2" cy="12.5" rx="2" ry="2.7" transform="rotate(-25 3.2 12.5)" />
-            <ellipse cx="20.8" cy="12.5" rx="2" ry="2.7" transform="rotate(25 20.8 12.5)" />
-            <path d="M12 10.5c3.6 0 6.5 2.7 6.5 6 0 2.8-2.3 4.5-6.5 4.5S5.5 19.3 5.5 16.5c0-3.3 2.9-6 6.5-6z" />
-          </svg>
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="card-title-row">
-          <h3 class="card-name"></h3>
-          <span class="badge size-badge"></span>
-        </div>
-        <p class="card-en"></p>
-        <ul class="card-stats">
-          <li><span>키</span><em class="stat-height"></em></li>
-          <li><span>몸무게</span><em class="stat-weight"></em></li>
-          <li><span>수명</span><em class="stat-life"></em></li>
-        </ul>
-        <p class="card-desc"></p>
-        <div class="card-tags"></div>
-      </div>
-    </article>
-  </template>
+  <footer class="site-footer"><div class="footer-inner"><a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M4 14.3 16 4l12 10.3v13a1.7 1.7 0 0 1-1.7 1.7h-7.1v-9h-6.4v9H5.7A1.7 1.7 0 0 1 4 27.3z"/></svg></span><span>어디살까<span class="brand-dot">.</span></span></a><p>더 나은 일상을 위한, 나만의 동네 찾기</p><span class="footer-copy">© 2026 어디살까. 정보는 참고용으로 제공됩니다.</span></div></footer>
 </body>
 </html>
